@@ -2,6 +2,19 @@ from django.conf import settings
 from django.db import models
 
 
+class Account(models.Model):
+    class Role(models.TextChoices):
+        BUSINESS = 'business', 'Бизнес'
+        STUDENT = 'student', 'Студенческая команда'
+        UNASSIGNED = 'unassigned', 'Тип не назначен'
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='account')
+    role = models.CharField('Тип пользователя', max_length=12, choices=Role.choices, default=Role.UNASSIGNED)
+
+    def __str__(self):
+        return f'{self.user} · {self.get_role_display()}'
+
+
 class Task(models.Model):
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     title = models.CharField('Название', max_length=180)

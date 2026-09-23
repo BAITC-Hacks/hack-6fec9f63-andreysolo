@@ -1,7 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 from django.db import transaction
-from projects.models import Task, Team, Proposal
+from projects.models import Task, Team, Proposal, Account
 from projects.services import breakdown
 
 
@@ -17,6 +17,7 @@ class Command(BaseCommand):
                 user.save()
             return user
         owner = account('business')
+        Account.objects.get_or_create(user=owner, defaults={'role': Account.Role.BUSINESS})
         examples = [
             ('Умный учёт заявок для кофейни', 'Ритейл', 'Теряем заказы на торты в мессенджерах. Нужен единый список заявок.'),
             ('Прогноз спроса на городские велосипеды', 'Транспорт', 'Хотим заранее видеть, на каких станциях закончатся велосипеды.'),
@@ -30,6 +31,7 @@ class Command(BaseCommand):
                 task.score = sum(r['earned'] for r in breakdown(task))
                 task.save()
             team, _ = Team.objects.get_or_create(user=account(f'team{i+1}'), defaults={'name': ['Steppe Coders', 'Data Nomads', 'Qadam', 'Green Stack', 'Jas AI'][i], 'interests': industry, 'skills': 'Python, Django, SQL, UX'})
+            Account.objects.get_or_create(user=team.user, defaults={'role': Account.Role.STUDENT})
             if not Proposal.objects.filter(task=task, team=team).exists():
                 Proposal.objects.create(task=task, team=team, idea='Проверим пользовательский сценарий и соберём прототип.', plan='Интервью → макет → реализация → проверка.', duration='2 недели', prototype='https://example.com/demo')
         self.stdout.write(self.style.SUCCESS('Demo ready: business, team1..team5 / AlemDemo2026!'))

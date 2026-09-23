@@ -1,14 +1,16 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
-from .models import Task, Team, Proposal
+from .models import Task, Team, Proposal, Account
 from .services import RUBRIC, analyze, breakdown
 
 
 class WorkflowTests(TestCase):
     def setUp(self):
         self.owner = get_user_model().objects.create_user('business', password='test')
+        Account.objects.create(user=self.owner, role=Account.Role.BUSINESS)
         self.student = get_user_model().objects.create_user('student', password='test')
+        Account.objects.create(user=self.student, role=Account.Role.STUDENT)
         self.team = Team.objects.create(user=self.student, name='Team', interests='IT', skills='Python')
         self.task = Task.objects.create(owner=self.owner, title='Заявки', industry='IT', draft='Теряем заявки')
 
@@ -39,7 +41,7 @@ class WorkflowTests(TestCase):
         self.client.post(reverse('propose', args=[self.task.pk]), {'idea': 'Решение', 'plan': 'План', 'duration': '2 недели'})
         proposal = Proposal.objects.get()
         self.assertEqual(proposal.status, 'pending')
-        self.assertEqual(self.client.post(reverse('decide', args=[proposal.pk]), {'action': 'selected'}).status_code, 404)
+        self.assertEqual(self.client.post(reverse('decide', args=[proposal.pk]), {'action': 'selected'}).status_code, 403)
         self.client.force_login(self.owner)
         self.client.post(reverse('decide', args=[proposal.pk]), {'action': 'selected'})
         self.assertEqual(self.client.post(reverse('decide', args=[proposal.pk]), {'action': 'progress'}).status_code, 400)
@@ -54,8 +56,8 @@ class WorkflowTests(TestCase):
     def test_permissions(self):
         self.assertEqual(self.client.get(reverse('detail', args=[self.task.pk])).status_code, 403)
         self.client.force_login(self.student)
-        self.assertEqual(self.client.get(reverse('edit', args=[self.task.pk])).status_code, 404)
-        self.assertEqual(self.client.post(reverse('publish', args=[self.task.pk])).status_code, 404)
+        self.assertEqual(self.client.get(reverse('edit', args=[self.task.pk])).status_code, 403)
+        self.assertEqual(self.client.post(reverse('publish', args=[self.task.pk])).status_code, 403)
         self.client.force_login(self.owner)
         self.assertEqual(self.client.get(reverse('publish', args=[self.task.pk])).status_code, 405)
 

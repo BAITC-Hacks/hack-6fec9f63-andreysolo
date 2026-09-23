@@ -2,11 +2,12 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
 from django.db.models import Q
-from django.http import HttpResponseForbidden, HttpResponseBadRequest
+from django.http import HttpResponseForbidden, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 from .forms import DraftForm, TaskForm, ProposalForm, EvidenceForm
-from .models import Task, Team, Proposal
+from .models import Task, Team, Proposal, Account
+from .roles import role_required, user_role
 from .services import grouped_questions, breakdown
 from .ai import generate_questions
 from .quality import assess_quality, baseline, QUALITY_VERSION
@@ -32,7 +33,7 @@ def workspace(request):
     return render(request, 'projects/workspace.html', {'tasks': Task.objects.filter(owner=request.user), 'proposals': Proposal.objects.filter(team__user=request.user).select_related('task', 'team')})
 
 
-@login_required
+@role_required(Account.Role.BUSINESS)
 def create(request):
     form = DraftForm(request.POST or None)
     if request.method == 'POST' and form.is_valid():
@@ -44,7 +45,7 @@ def create(request):
     return render(request, 'projects/form.html', {'form': form, 'heading': 'Начнём с вашей задачи', 'subtitle': 'Опишите потребность своими словами. Затем уточним детали.', 'button': 'Продолжить →'})
 
 
-@login_required
+@role_required(Account.Role.BUSINESS)
 def edit(request, pk):
     from .wizard import STEPS, step_form
     from .question_scopes import SCOPE_VERSION
@@ -142,16 +143,17 @@ def edit(request, pk):
 
 def detail(request, pk):
     task = get_object_or_404(Task, pk=pk)
-    owner = request.user.is_authenticated and task.owner_id == request.user.pk
+    role = user_role(request.user)
+    owner = role == Account.Role.BUSINESS and task.owner_id == request.user.pk
     if not task.published and not owner:
         return HttpResponseForbidden('Черновик доступен только автору.')
-    team = Team.objects.filter(user=request.user).first() if request.user.is_authenticated else None
+    team = Team.objects.filter(user=request.user).first() if role == Account.Role.STUDENT else None
     proposals = task.proposals.select_related('team') if owner else task.proposals.filter(team=team).select_related('team')
     fields = [(task._meta.get_field(f).verbose_name, getattr(task, f)) for f in ['context', 'need', 'users', 'data', 'constraints', 'result', 'success', 'contact', 'interaction']]
     return render(request, 'projects/detail.html', {'task': task, 'owner': owner, 'team': team, 'rows': breakdown(task), 'fields': fields, 'proposals': proposals, 'form': ProposalForm()})
 
 
-@login_required
+@role_required(Account.Role.BUSINESS)
 @require_POST
 def publish(request, pk):
     task = get_object_or_404(Task, pk=pk, owner=request.user)
@@ -163,7 +165,7 @@ def publish(request, pk):
     return redirect('detail', pk=pk)
 
 
-@login_required
+@role_required(Account.Role.STUDENT)
 def propose(request, pk):
     task = get_object_or_404(Task, pk=pk, published=True)
     team = get_object_or_404(Team, user=request.user)
@@ -179,7 +181,7 @@ def propose(request, pk):
     return render(request, 'projects/form.html', {'form': form, 'heading': 'Предложить решение', 'subtitle': task.title, 'button': 'Отправить предложение'})
 
 
-@login_required
+@role_required(Account.Role.BUSINESS)
 @require_POST
 @transaction.atomic
 def decide(request, pk):
@@ -190,12 +192,16 @@ def decide(request, pk):
     elif action in ('selected', 'rejected') and not proposal.progress_confirmed:
         proposal.status = action
     else:
+        if request.headers.get('Accept') == 'application/json':
+            return JsonResponse({'error': 'Действие недоступно. Обновите карточку: для подтверждения этапа нужен результат выбранной команды.'}, status=400)
         return HttpResponseBadRequest('Недопустимое действие. Для баллов нужен результат выбранной команды.')
     proposal.save()
+    if request.headers.get('Accept') == 'application/json':
+        return JsonResponse({'id': proposal.pk, 'status': proposal.status, 'status_label': proposal.get_status_display(), 'progress_confirmed': proposal.progress_confirmed, 'can_confirm_progress': proposal.status == 'selected' and bool(proposal.evidence.strip()) and not proposal.progress_confirmed})
     return redirect('detail', pk=proposal.task_id)
 
 
-@login_required
+@role_required(Account.Role.STUDENT)
 def evidence(request, pk):
     proposal = get_object_or_404(Proposal, pk=pk, team__user=request.user, status='selected', progress_confirmed=False)
     form = EvidenceForm(request.POST or None, instance=proposal)

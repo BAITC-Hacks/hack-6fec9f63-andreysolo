@@ -4,13 +4,14 @@ from django.test import TestCase, override_settings
 from django.contrib.auth import get_user_model
 from openai import OpenAIError
 from .ai import generate_questions, Questions, BlockQuestions, ScopeReview
-from .models import Task
+from .models import Task, Account
 
 
 @override_settings(OPENAI_API_KEY='test-only', OPENAI_MODEL='gpt-5.4-mini')
 class AITests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user('owner')
+        Account.objects.create(user=self.user, role=Account.Role.BUSINESS)
         self.task = Task.objects.create(owner=self.user, title='Coffee', industry='Retail', draft='Orders get lost', contact='private@example.test')
 
     @patch('projects.ai.OpenAI')
@@ -95,7 +96,7 @@ class AITests(TestCase):
         self.assertContains(response, 'Уточнённое название')
         self.assertEqual(self.client.session[f'task_wizard_{self.task.pk}']['values']['context'], 'Сохранённый контекст')
         self.client.force_login(get_user_model().objects.create_user('stranger'))
-        self.assertEqual(self.client.post(url, {**data, 'action': 'next'}).status_code, 404)
+        self.assertEqual(self.client.post(url, {**data, 'action': 'next'}).status_code, 403)
         generate.assert_not_called()
 
     @patch('projects.ai.OpenAI')

@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 from django.test import TestCase, override_settings
-from .models import Task
+from .models import Task, Account
 from .quality import assess_quality, QualityReview, EvidenceAudit, FIELD_WEIGHTS, baseline
 from .services import breakdown
 
@@ -67,6 +67,7 @@ class QualityTests(TestCase):
         from .question_scopes import SCOPE_VERSION
         from .quality import QUALITY_VERSION
         owner = get_user_model().objects.create_user('review-owner')
+        Account.objects.create(user=owner, role=Account.Role.BUSINESS)
         self.task.owner = owner
         self.task.save()
         self.client.force_login(owner)
@@ -106,6 +107,7 @@ class QualityTests(TestCase):
         from django.contrib.auth import get_user_model
         from .forms import TaskForm
         owner = get_user_model().objects.create_user('skip-owner')
+        Account.objects.create(user=owner, role=Account.Role.BUSINESS)
         self.task.owner = owner
         self.task.save()
         self.client.force_login(owner)
