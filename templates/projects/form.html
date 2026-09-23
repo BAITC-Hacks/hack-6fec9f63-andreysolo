@@ -1,0 +1,26 @@
+{% extends 'base.html' %}
+{% block content %}
+<a class="back" href="{% url 'catalog' %}">← Каталог</a>
+<div class="section-heading"><div class="eyebrow">КОНСТРУКТОР ЗАДАЧИ</div><h1 class="page-title">{{ heading }}</h1><p>{{ subtitle }}</p></div>
+<div class="constructor">
+{% if questions %}
+<section class="panel assistant-toolbar">
+<div><span class="tag">{{ assistant_source }}</span><h2>Уточним детали по блокам</h2><p>{{ assistant_notice }}</p></div>
+<div class="assistant-action"><button class="button small" form="task-form" name="action" value="analyze" formnovalidate>Уточнить с OpenAI</button><p>Текущие поля описания будут отправлены в OpenAI. Поле контакта не передаётся.</p></div>
+</section>
+{% endif %}
+<form id="task-form" method="post" class="panel form-panel">
+{% csrf_token %}
+{% if field_blocks %}
+{{ form.non_field_errors }}
+{% for block in field_blocks %}
+<div class="constructor-field" data-field="{{ block.field.name }}">
+{{ block.field.label_tag }}{{ block.field.errors }}{{ block.field }}
+{% if block.field.help_text %}<div class="helptext">{{ block.field.help_text }}</div>{% endif %}
+{% if block.questions %}<div class="field-questions"><span class="question-label">Что стоит уточнить</span><ul>{% for question in block.questions %}<li>{{ question }}</li>{% endfor %}</ul></div>{% endif %}
+</div>
+{% endfor %}
+{% else %}{{ form.as_p }}{% endif %}
+<button class="button">{{ button }}</button>
+</form></div>
+{% endblock %}
