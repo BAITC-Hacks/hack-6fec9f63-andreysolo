@@ -15,7 +15,12 @@ PROMPT = '''Проанализируй карточку бизнес-задач�
 
 
 def breakdown(task):
-    return [{'label': label, 'max': weight, 'earned': weight if task.confirmed and all(getattr(task, f).strip() for f in fields) else 0, 'question': question} for label, weight, fields, question in RUBRIC]
+    from .quality import FIELD_WEIGHTS, field_rating
+    rows = []
+    for label, weight, fields, question in RUBRIC:
+        ratings = [(name, *field_rating(task, name)) for name in fields]
+        rows.append({'label': label, 'max': weight, 'earned': sum(FIELD_WEIGHTS[name] * percent for name, percent, _, _ in ratings) // 100, 'question': question, 'details': [{'label': task._meta.get_field(name).verbose_name, 'reason': reason, 'missing': missing} for name, _, reason, missing in ratings]})
+    return rows
 
 
 def analyze(task, raw_response=None):

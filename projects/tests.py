@@ -33,7 +33,7 @@ class WorkflowTests(TestCase):
         self.assertFalse(self.task.confirmed)
         self.assertRedirects(self.client.post(url, {'step': len(STEPS), 'action': 'save', 'confirm': 'on'}), reverse('detail', args=[self.task.pk]))
         self.task.refresh_from_db()
-        self.assertEqual(self.task.score, 100)
+        self.assertEqual(self.task.score, 49)
         self.client.post(reverse('publish', args=[self.task.pk]))
         self.client.force_login(self.student)
         self.client.post(reverse('propose', args=[self.task.pk]), {'idea': 'Решение', 'plan': 'План', 'duration': '2 недели'})
@@ -71,9 +71,9 @@ class WorkflowTests(TestCase):
         self.task.context = self.task.need = 'Текст'
         self.assertEqual(sum(r['earned'] for r in breakdown(self.task)), 0)
         self.task.confirmed = True
-        self.assertEqual(sum(r['earned'] for r in breakdown(self.task)), 20)
+        self.assertEqual(sum(r['earned'] for r in breakdown(self.task)), 10)
         self.task.need = '   '
-        self.assertEqual(sum(r['earned'] for r in breakdown(self.task)), 0)
+        self.assertEqual(sum(r['earned'] for r in breakdown(self.task)), 5)
         for response in ['garbage', '{}', '{"questions": [1,2,3]}', '{"questions": "wrong"}']:
             self.assertGreaterEqual(len(analyze(self.task, response)), 3)
 

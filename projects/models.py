@@ -19,6 +19,7 @@ class Task(models.Model):
     confirmed = models.BooleanField(default=False)
     published = models.BooleanField(default=False)
     score = models.PositiveSmallIntegerField(default=0)
+    quality_reviews = models.JSONField(default=dict, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

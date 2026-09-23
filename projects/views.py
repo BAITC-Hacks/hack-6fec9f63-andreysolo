@@ -9,6 +9,7 @@ from .forms import DraftForm, TaskForm, ProposalForm, EvidenceForm
 from .models import Task, Team, Proposal
 from .services import grouped_questions, breakdown
 from .ai import generate_questions
+from .quality import assess_quality, baseline, QUALITY_VERSION
 
 
 def catalog(request):
@@ -54,6 +55,11 @@ def edit(request, pk):
         state = {'step': 0, 'values': {name: getattr(task, name) for name in TaskForm.Meta.fields}, 'analysis': None}
     if state.get('scope_version') != SCOPE_VERSION:
         state.update(analysis=None, scope_version=SCOPE_VERSION)
+    state.setdefault('quality_reviews', dict(task.quality_reviews))
+    state.setdefault('question_history', {})
+    state.setdefault('question_initial_values', {})
+    if state.get('quality_version') != QUALITY_VERSION:
+        state.update(analysis=None, quality_version=QUALITY_VERSION)
     index = state['step']
     action = request.POST.get('action', '')
     if request.method == 'POST' and request.POST.get('step') != str(index):
@@ -69,23 +75,62 @@ def edit(request, pk):
         if request.method == 'POST' and action == 'save' and form.is_valid():
             task = form.save(commit=False)
             task.confirmed = True
+            task.quality_reviews = state['quality_reviews']
             task.score = sum(row['earned'] for row in breakdown(task))
             task.save()
             del request.session[key]
             messages.success(request, 'Карточка подтверждена. Рейтинг пересчитан.')
             return redirect('detail', pk=pk)
-        return render(request, 'projects/wizard.html', {'task': task, 'form': form, 'review': True, 'index': index, 'steps': STEPS, 'summary': [(Task._meta.get_field(name).verbose_name, value) for name, value in state['values'].items()]})
+        for name, value in state['values'].items():
+            setattr(task, name, value)
+        task.confirmed = True
+        task.quality_reviews = state['quality_reviews']
+        preview_rows = breakdown(task)
+        return render(request, 'projects/wizard.html', {'rating_rows': preview_rows, 'preview_score': sum(row['earned'] for row in preview_rows), 'task': task, 'form': form, 'review': True, 'index': index, 'steps': STEPS, 'summary': [(Task._meta.get_field(name).verbose_name, value) for name, value in state['values'].items()]})
     form = step_form(index, request.POST if request.method == 'POST' else None, state['values'])
     if request.method == 'POST' and form.is_valid():
         state['values'].update(form.cleaned_data)
+        for name, value in state['values'].items():
+            setattr(task, name, value)
+        fields = STEPS[index][1]
+        history_key = str(index)
+        history = state['question_history'].setdefault(history_key, [])
+        for field in fields:
+            for question in state['quality_reviews'].get(field, {}).get('questions', []):
+                item = {'field': field, 'text': question['text']}
+                if item not in history:
+                    history.append(item)
         if action == 'back' and index > 0:
             state.update(step=index - 1, analysis=None)
         elif action == 'continue' and state['analysis']:
+            unchanged = state['question_initial_values'].get(history_key) == {name: state['values'][name] for name in fields}
+            if unchanged and state['analysis']['questions']:
+                reviews = baseline(task, fields)
+                for name in fields:
+                    pending = [q for q in history if q['field'] == name]
+                    if pending:
+                        reviews[name].update(reason=f'Продолжили без дополнений: осталось уточнений — {len(pending)}.', questions=[{'text': q['text'], 'resolved': False} for q in pending])
+                # Fields without questions still need a quality check before full marks.
+                remaining = [name for name in fields if not any(q['field'] == name for q in history)]
+                if remaining:
+                    reviews.update(assess_quality(task, remaining, []))
+            else:
+                reviews = assess_quality(task, fields, history)
+            state['quality_reviews'].update(reviews)
+            if any(r['source'] != 'openai' for r in reviews.values()):
+                messages.info(request, 'Без подтверждённого устранения уточнений начисляются только базовые баллы за заполнение.')
             state.update(step=index + 1, analysis=None)
         elif action in ('next', 'analyze'):
             for name, value in state['values'].items():
                 setattr(task, name, value)
-            state['analysis'] = generate_questions(task, focus_fields=STEPS[index][1])
+            state['analysis'] = generate_questions(task, focus_fields=fields)
+            state['analyzed_values'] = {name: state['values'][name] for name in fields}
+            if state['analysis']['source'] == 'OpenAI':
+                if state['analysis']['questions'] and not history:
+                    state['question_initial_values'][history_key] = dict(state['analyzed_values'])
+                for question in state['analysis']['questions']:
+                    if question not in history:
+                        history.append(question)
         request.session[key] = state
         return redirect('edit', pk=pk)
     request.session[key] = state

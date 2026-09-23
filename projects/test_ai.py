@@ -59,6 +59,7 @@ class AITests(TestCase):
         self.assertEqual(fallback['source'], 'Локальный помощник')
         self.assertTrue(all(q['field'] == 'context' for q in fallback['questions']))
 
+    @override_settings(OPENAI_API_KEY='')
     @patch('projects.views.generate_questions')
     def test_wizard_requires_questions_before_next_step(self, generate):
         generate.return_value = {'questions': [{'field': 'title', 'text': 'Что должно отражать название?'}], 'source': 'OpenAI', 'notice': 'Ready'}
