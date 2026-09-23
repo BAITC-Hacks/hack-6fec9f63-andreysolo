@@ -45,28 +45,54 @@ def create(request):
 
 @login_required
 def edit(request, pk):
+    from .wizard import STEPS, step_form
+    from .question_scopes import SCOPE_VERSION
     task = get_object_or_404(Task, pk=pk, owner=request.user)
-    questions = grouped_questions(task)
-    assistant_source = 'Локальный помощник'
-    assistant_notice = 'Ответьте в полях карточки или запросите уточняющие вопросы у OpenAI.'
-    form = TaskForm(request.POST or None, instance=task)
-    ai_requested = request.method == 'POST' and request.POST.get('action') == 'analyze'
-    if ai_requested:
-        form.fields['confirm'].required = False
-        if form.is_valid():
-            analysis = generate_questions(form.instance)
-            questions = analysis['questions']
-            assistant_source = analysis['source']
-            assistant_notice = analysis['notice']
-    elif request.method == 'POST' and form.is_valid():
-        task = form.save(commit=False)
-        task.confirmed = True
-        task.score = sum(row['earned'] for row in breakdown(task))
-        task.save()
-        messages.success(request, 'Карточка подтверждена. Рейтинг пересчитан.')
-        return redirect('detail', pk=task.pk)
-    field_blocks = [{'field': field, 'questions': [q['text'] for q in questions if q['field'] == field.name]} for field in form]
-    return render(request, 'projects/form.html', {'form': form, 'field_blocks': field_blocks, 'task': task, 'questions': questions, 'assistant_source': assistant_source, 'assistant_notice': assistant_notice, 'heading': 'Добавьте ясности — получите баллы', 'subtitle': 'Заполняйте только известные сведения. Каждое подтверждённое дополнение повышает готовность.', 'button': 'Подтвердить и сохранить'})
+    key = f'task_wizard_{pk}'
+    state = request.session.get(key)
+    if not state:
+        state = {'step': 0, 'values': {name: getattr(task, name) for name in TaskForm.Meta.fields}, 'analysis': None}
+    if state.get('scope_version') != SCOPE_VERSION:
+        state.update(analysis=None, scope_version=SCOPE_VERSION)
+    index = state['step']
+    action = request.POST.get('action', '')
+    if request.method == 'POST' and request.POST.get('step') != str(index):
+        messages.info(request, 'Этот шаг уже изменился. Продолжите с текущего блока.')
+        return redirect('edit', pk=pk)
+    if index == len(STEPS):
+        if request.method == 'POST' and action == 'back':
+            state.update(step=index - 1, analysis=None)
+            request.session[key] = state
+            return redirect('edit', pk=pk)
+        data = {**state['values'], 'confirm': request.POST.get('confirm', '')}
+        form = TaskForm(data if request.method == 'POST' else None, initial=state['values'], instance=task)
+        if request.method == 'POST' and action == 'save' and form.is_valid():
+            task = form.save(commit=False)
+            task.confirmed = True
+            task.score = sum(row['earned'] for row in breakdown(task))
+            task.save()
+            del request.session[key]
+            messages.success(request, 'Карточка подтверждена. Рейтинг пересчитан.')
+            return redirect('detail', pk=pk)
+        return render(request, 'projects/wizard.html', {'task': task, 'form': form, 'review': True, 'index': index, 'steps': STEPS, 'summary': [(Task._meta.get_field(name).verbose_name, value) for name, value in state['values'].items()]})
+    form = step_form(index, request.POST if request.method == 'POST' else None, state['values'])
+    if request.method == 'POST' and form.is_valid():
+        state['values'].update(form.cleaned_data)
+        if action == 'back' and index > 0:
+            state.update(step=index - 1, analysis=None)
+        elif action == 'continue' and state['analysis']:
+            state.update(step=index + 1, analysis=None)
+        elif action in ('next', 'analyze'):
+            for name, value in state['values'].items():
+                setattr(task, name, value)
+            state['analysis'] = generate_questions(task, focus_fields=STEPS[index][1])
+        request.session[key] = state
+        return redirect('edit', pk=pk)
+    request.session[key] = state
+    analysis = state['analysis']
+    questions = analysis['questions'] if analysis else []
+    blocks = [{'field': field, 'questions': [q['text'] for q in questions if q['field'] == field.name]} for field in form]
+    return render(request, 'projects/wizard.html', {'task': task, 'form': form, 'field_blocks': blocks, 'analysis': analysis, 'index': index, 'number': index + 1, 'step_title': STEPS[index][0], 'steps': STEPS, 'progress': round(index / len(STEPS) * 100)})
 
 
 def detail(request, pk):

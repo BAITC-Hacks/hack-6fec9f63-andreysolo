@@ -1,0 +1,24 @@
+{% extends 'base.html' %}
+{% load static %}
+{% block content %}
+<a class="back" href="{% url 'detail' task.pk %}">← К карточке</a>
+<div class="section-heading"><div class="eyebrow">КОНСТРУКТОР ЗАДАЧИ</div><h1 class="page-title">{% if review %}Всё готово к проверке{% else %}Разберём задачу по шагам{% endif %}</h1><p>Заполните блок, обсудите детали с ИИ и переходите дальше. Изменения сохраняются в черновике сессии до подтверждения карточки.</p></div>
+<div class="wizard-layout">
+<aside class="panel wizard-steps" aria-label="Этапы конструктора"><h3>Ваша задача</h3><ol>{% for title,fields in steps %}<li class="{% if forloop.counter0 == index %}current{% elif forloop.counter0 < index %}done{% endif %}" {% if forloop.counter0 == index %}aria-current="step"{% endif %}><span>{{ forloop.counter }}</span>{{ title }}</li>{% endfor %}<li class="{% if review %}current{% endif %}"><span>✓</span>Подтверждение</li></ol></aside>
+<section class="panel wizard-content">
+{% if review %}
+<span class="tag">Последний шаг</span><h2>Проверьте карточку</h2>
+{% for label,value in summary %}<div class="detail-field"><h3>{{ label }}</h3><p>{{ value|default:'Пока не уточнено'|linebreaksbr }}</p></div>{% endfor %}
+<form method="post" data-wizard-form>{% csrf_token %}<input type="hidden" name="step" value="{{ index }}">{{ form.non_field_errors }}{{ form.confirm.errors }}<p>{{ form.confirm }} {{ form.confirm.label }}</p><div class="actions"><button class="button secondary" name="action" value="back" formnovalidate>← Назад</button><button class="button" name="action" value="save">Подтвердить и сохранить</button></div></form>
+{% else %}
+<span class="tag">Блок {{ number }} из {{ steps|length }}</span><h2>{{ step_title }}</h2>
+<div class="progress"><span style="width:{{ progress }}%"></span></div>
+<form method="post" data-wizard-form>{% csrf_token %}<input type="hidden" name="step" value="{{ index }}">{{ form.non_field_errors }}
+{% for block in field_blocks %}<div class="constructor-field" data-field="{{ block.field.name }}">{{ block.field.label_tag }}<p class="field-guidance" id="{{ block.field.auto_id }}_helptext">{{ block.field.help_text }}</p>{{ block.field.errors }}{{ block.field }}{% if block.questions %}<div class="field-questions"><span class="question-label">{{ analysis.source }} · что добавить в описание</span><ul>{% for question in block.questions %}<li>{{ question }}</li>{% endfor %}</ul></div>{% endif %}</div>{% endfor %}
+{% if analysis %}<p class="wizard-note" role="status">{{ analysis.notice }}</p>{% else %}<p class="wizard-note">Нажмите «Далее», чтобы ИИ предложил, чем дополнить ваш текст перед переходом к следующему блоку. Текст карточки отправляется в OpenAI; контактное поле скрыто.</p>{% endif %}
+<div class="actions wizard-actions">{% if index > 0 %}<button class="button secondary" name="action" value="back" formnovalidate>← Назад</button>{% endif %}{% if analysis %}<button class="button secondary" name="action" value="analyze" data-ai-action>Проверить уточнения</button><button class="button" name="action" value="continue">Продолжить →</button>{% else %}<button class="button" name="action" value="next" data-ai-action>Далее · уточнить с ИИ →</button>{% endif %}</div><p class="wizard-loading" role="status" hidden>ИИ анализирует текст и готовит подсказки…</p>
+</form>
+{% endif %}
+</section></div>
+<script src="{% static 'wizard.js' %}" defer></script>
+{% endblock %}

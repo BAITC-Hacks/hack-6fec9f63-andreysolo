@@ -1,5 +1,5 @@
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from .models import Task, Team, Proposal
 from .services import RUBRIC, analyze, breakdown
@@ -12,12 +12,26 @@ class WorkflowTests(TestCase):
         self.team = Team.objects.create(user=self.student, name='Team', interests='IT', skills='Python')
         self.task = Task.objects.create(owner=self.owner, title='Заявки', industry='IT', draft='Теряем заявки')
 
+    @override_settings(OPENAI_API_KEY="")
     def test_complete_workflow(self):
         self.client.force_login(self.owner)
         self.assertEqual(self.client.post(reverse('publish', args=[self.task.pk])).status_code, 400)
         fields = {f: 'Подтверждённые сведения' for _, _, names, _ in RUBRIC for f in names}
         fields.update(title='Заявки', industry='IT', confirm='on')
-        self.assertRedirects(self.client.post(reverse('edit', args=[self.task.pk]), fields), reverse('detail', args=[self.task.pk]))
+        from .wizard import STEPS
+        url = reverse('edit', args=[self.task.pk])
+        self.client.get(url)
+        for index, (_, names) in enumerate(STEPS):
+            data = {name: fields[name] for name in names}
+            response = self.client.post(url, {**data, 'step': index, 'action': 'next'}, follow=True)
+            self.assertEqual(response.context['index'], index)
+            self.assertTrue(response.context['analysis'])
+            self.client.post(url, {**data, 'step': index, 'action': 'continue'})
+        self.assertContains(self.client.get(url), 'Проверьте карточку')
+        self.client.post(url, {'step': len(STEPS), 'action': 'save'})
+        self.task.refresh_from_db()
+        self.assertFalse(self.task.confirmed)
+        self.assertRedirects(self.client.post(url, {'step': len(STEPS), 'action': 'save', 'confirm': 'on'}), reverse('detail', args=[self.task.pk]))
         self.task.refresh_from_db()
         self.assertEqual(self.task.score, 100)
         self.client.post(reverse('publish', args=[self.task.pk]))
